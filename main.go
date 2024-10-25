@@ -97,6 +97,6 @@ func main() {
 	// Bọc server chính với middleware CORS
 	http.Handle("/", corsMiddleware(http.DefaultServeMux))
 
-	fmt.Println("Server started at :8082")
-	log.Fatal(http.ListenAndServe(":8082", nil))
+	fmt.Println("Server started at :8080")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
