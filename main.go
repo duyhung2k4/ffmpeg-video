@@ -29,9 +29,8 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		"-i", "pipe:0",
 		"-c:v", "libx264", // Sử dụng libx264 để mã hóa bằng CPU
 		"-preset", "fast", // Thay đổi preset
-		"-profile:v", "high",
 		"-crf", "18", // Tăng giá trị CRF để giảm chất lượng một chút
-		"-b:v", "3000k", // Giảm bitrate xuống 1500 kbps
+		"-b:v", "500k", // Giảm bitrate xuống 1500 kbps
 		"-r", "60", // Giảm FPS xuống 30
 		"-g", "60", // Khoảng cách giữa các keyframe
 		"-sc_threshold", "0",
