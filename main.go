@@ -28,15 +28,15 @@ func handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	cmd := exec.Command("ffmpeg",
 		"-i", "pipe:0",
 		"-c:v", "libx264", // Sử dụng libx264 để mã hóa bằng CPU
-		"-preset", "medium", // Thay đổi preset
+		"-preset", "fast", // Thay đổi preset
 		"-profile:v", "high",
 		"-crf", "20", // Tăng giá trị CRF để giảm chất lượng một chút
-		"-b:v", "1500k", // Giảm bitrate xuống 1500 kbps
-		"-r", "30", // Giảm FPS xuống 30
-		"-g", "30", // Khoảng cách giữa các keyframe
+		"-b:v", "3000k", // Giảm bitrate xuống 1500 kbps
+		"-r", "60", // Giảm FPS xuống 30
+		"-g", "60", // Khoảng cách giữa các keyframe
 		"-sc_threshold", "0",
 		"-pix_fmt", "yuv420p",
-		"-threads", "6", // Sử dụng 4 luồng
+		"-threads", "32", // Sử dụng 4 luồng
 		"-hls_time", "1", // Chia đoạn HLS thành 1 giây
 		"-hls_list_size", "0",
 		"-f", "hls",
