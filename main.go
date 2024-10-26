@@ -1,100 +1,84 @@
+// main.go
 package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+	"sync"
 
-	"github.com/gorilla/websocket"
+	"github.com/google/uuid"
+	"github.com/rs/cors"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(r *http.Request) bool {
-		return true // Cho phép tất cả các nguồn (cẩn thận với điều này trong môi trường sản xuất)
-	},
-}
+var chanFile chan string
 
-func handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	conn, err := upgrader.Upgrade(w, r, nil)
+func uploadHandler(w http.ResponseWriter, r *http.Request) {
+	uuidString := uuid.New().String()
+	fileName := fmt.Sprintf("video/%s.mp4", uuidString)
+	file, err := os.Create(fileName)
 	if err != nil {
-		log.Println("WebSocket upgrade error:", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer conn.Close()
+	defer file.Close()
 
-	dir := "./hls/hls.tmp" // Tạo HLS stream trong từng thư mục riêng
-	cmd := exec.Command("ffmpeg",
-		"-i", "pipe:0",
-		"-c:v", "libx264", // Sử dụng libx264 để mã hóa bằng CPU
-		"-preset", "fast", // Thay đổi preset
-		"-crf", "18", // Tăng giá trị CRF để giảm chất lượng một chút
-		"-b:v", "500k", // Giảm bitrate xuống 1500 kbps
-		"-r", "60", // Giảm FPS xuống 30
-		"-g", "60", // Khoảng cách giữa các keyframe
-		"-sc_threshold", "0",
-		"-pix_fmt", "yuv420p",
-		"-hls_time", "1", // Chia đoạn HLS thành 1 giây
-		"-hls_list_size", "0",
-		"-f", "hls",
-		dir, // Đầu ra của HLS cho từng thư mục
-	)
-
-	ffmpegStdin, err := cmd.StdinPipe()
+	_, err = io.Copy(file, r.Body)
 	if err != nil {
-		log.Fatal("Error creating FFmpeg stdin pipe:", err)
-	}
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-	err = cmd.Start()
-	if err != nil {
-		log.Fatal("Failed to start FFmpeg:", err)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
-	for {
-		_, message, err := conn.ReadMessage()
-		if err != nil {
-			log.Println("Read error:", err)
-			break
-		}
-		n, err := ffmpegStdin.Write(message)
-		log.Println(n)
-		if err != nil {
-			log.Printf("Failed to write to FFmpeg stdin %v", err)
-		}
-	}
+	chanFile <- uuidString
 
-	// Đóng các pipe và chờ các tiến trình kết thúc
-	ffmpegStdin.Close()
-	cmd.Wait()
+	w.WriteHeader(http.StatusOK)
 }
 
-// Middleware để xử lý CORS
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*") // Cho phép tất cả các nguồn
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+// Hàm chuyển đổi video sang chất lượng thấp hơn sử dụng ffmpeg
+func convertVideoToLowQuality(inputFile string, outputFile string) error {
+	// Gọi ffmpeg để chuyển đổi video sang chất lượng thấp hơn
+	cmd := exec.Command(
+		"ffmpeg",
+		"-i", inputFile,
+		"-vf", "scale=640:360",
+		"-vcodec", "libx264",
+		outputFile,
+	)
 
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusOK)
-			return // Trả về cho các yêu cầu OPTIONS
-		}
+	// Gửi output của ffmpeg vào terminal để debug nếu cần
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 
-		next.ServeHTTP(w, r)
-	})
+	// Thực thi lệnh
+	return cmd.Run()
 }
 
 func main() {
-	http.HandleFunc("/ws", handleWebSocket)
+	chanFile = make(chan string)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		log.Println("start chanel")
+		for uuidString := range chanFile {
+			fileName := fmt.Sprintf("video/%s.mp4", uuidString)
+			lowFile := fmt.Sprintf("low/%s.mp4", uuidString)
+			err := convertVideoToLowQuality(fileName, lowFile)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+		wg.Done()
+	}()
 
-	// Bọc serve HLS với middleware CORS
-	http.Handle("/hls/", corsMiddleware(http.StripPrefix("/hls/", http.FileServer(http.Dir("./hls")))))
+	mux := http.NewServeMux()
+	mux.HandleFunc("/upload", uploadHandler)
 
-	// Bọc server chính với middleware CORS
-	http.Handle("/", corsMiddleware(http.DefaultServeMux))
+	// Sử dụng thư viện CORS
+	handler := cors.Default().Handler(mux)
+	http.ListenAndServe(":8080", handler)
 
-	fmt.Println("Server started at :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	wg.Wait()
 }
